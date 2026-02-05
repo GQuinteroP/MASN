@@ -12205,6 +12205,26 @@
 			(justify left bottom)
 		)
 	)
+	(gr_text_box "Copyright (C) 2026 - G. Quintero\nThis program/design is free software: you can redistribute it and/or modify \nit under the terms of the following licenses:\n\nFIRMWARE/SOFTWARE:\nLicensed under the GNU General Public License as published by the Free \nSoftware Foundation, either version 3 of the License, or (at your option) \nany later version. \nSPDX-License-Identifier: GPL-3.0-or-later\n\nHARDWARE:\nLicensed under the CERN Open Hardware Licence Version 2 - Strongly \nReciprocal.\nSPDX-License-Identifier: CERN-OHL-S-2.0\n\nThis project is distributed in the hope that it will be useful, but \nWITHOUT ANY WARRANTY; without even the implied warranty of \nMERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the \napplicable licenses for more details."
+		(start 63 107.5)
+		(end 95 124.5)
+		(margins 1.0025 1.0025 1.0025 1.0025)
+		(layer "Cmts.User")
+		(uuid "34f4c873-f524-4a0c-87e1-91142c812045")
+		(effects
+			(font
+				(size 0.5 0.5)
+				(thickness 0.1)
+				(bold yes)
+			)
+			(justify left top)
+		)
+		(border no)
+		(stroke
+			(width 0)
+			(type solid)
+		)
+	)
 	(segment
 		(start 37.427587 108.127587)
 		(end 37.1 107.8)
