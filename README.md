@@ -29,17 +29,16 @@ The MASN is implemented on a double-sided printed circuit board (PCB). The archi
 ## Firmware & Software
 
 ### Firmware Description (Current Implementation)
-The firmware is built on **FreeRTOS**, focusing on:
-* **Sampling:** Audio acquisition using DMA and I2S protocol at $F_s = 32$ kHz.
+The firmware is built on **FreeRTOS**, following the architecture proposed in Quintero-Perez et al. (2026). It enables concurrent execution of four primary tasks:
+* **Sampling:** Continuous audio acquisition using DMA and I2S protocol at $F_s = 32$ kHz.
 * **Signal Processing:** Basic computation of $L_{Aeq}$ and OTOB indices ($L_{eq, f_c}$).
+* **Georeferencing (GNSS):** Interfacing with the MAX-M10S module to retrieve latitude, longitude, satellite count (Sat#), and fix quality (Q). This metadata is integrated into the acoustic data blocks.
 * **Transmission:** Support for network attachment and data delivery via **CoAP protocol** over NB-IoT.
-
-
 
 ### Configuration GUI
 A Python-based GUI facilitates node management via USB-C:
 * **Location:** `/Software/CONFIG_GUI`
-* **Features:** Time synchronization, module management, and sensor calibration.
+* **Features:** Time synchronization, module management (GNSS/NB-IoT), and sensor calibration.
 
 ---
 
@@ -55,6 +54,14 @@ A Python-based GUI facilitates node management via USB-C:
 - **Prescaler Drift:** Issues observed with prescaler stability over very long-term operation.
 - **Communication Inefficiency:** Optimization required for both NB-IoT module and USB-C serial communication stacks.
 - **Interrupt Overhead:** High processing load within `HAL_UART_RxCpltCallback`; logic needs to be migrated to task-level processing.
+
+---
+
+## Citation
+
+If you use this hardware or software in your research, please cite the following paper:
+
+> Quintero, G., Balastegui, A., & Romeu, J. (2026). **Autonomous mobile low-cost sensor node for high-resolution noise sampling in urban environments**. *Measurement*. (Accepted, pending publication).
 
 ---
 
