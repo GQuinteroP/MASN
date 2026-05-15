@@ -943,7 +943,7 @@ void S7022_error(uint8_t *source)
 			osTimerStart(timeout_LPWAHandle, lwpa_long_timeout);
 		}
 		HAL_GPIO_WritePin(RST_port, RST_pin, GPIO_PIN_RESET);
-		LPWA.status = 1;
+		LPWA.status = 1;	//Timed out!
 		osSemaphoreRelease(sem_process_LPWAHandle);
 		return;
 	}

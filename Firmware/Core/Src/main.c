@@ -349,6 +349,7 @@ struct BUFF_GPS GNSS;
 const uint8_t	server_IP[15] =	"127.0.0.1";
 const uint16_t	server_port = 5435;
 
+
 uint8_t buffer_lpwa[250];		//Buffer for storing characters received (Higher than queue to avoid overflow)
 uint8_t n_res = 0;
 uint8_t coap_custom_res_flag = 0;
@@ -1673,9 +1674,9 @@ void task_data_send(void *argument)
 			continue;
 		#endif*/
 		lpwa_flag_rx = false;
-		//HAL_GPIO_WritePin(RST_port, RST_pin, GPIO_PIN_RESET);
-		if(n_blocks_LPWA>n_blocks_LPWA_limit)
-			LPWA_disable();
+
+		if((n_blocks_LPWA > n_blocks_LPWA_limit) && (LPWA.status != 1))
+					LPWA_disable();
 
 		for(uint16_t curr_block=0; curr_block<n_blocks; curr_block++)
 			memset(leqs_buffer_LWPA[curr_block], 0, block_len);
@@ -3343,6 +3344,7 @@ void rst_timeout_LPWA(void *argument)
 		LPWA.status = 3;
 		HAL_GPIO_WritePin(RST_port, RST_pin, GPIO_PIN_RESET);
 	}
+	S7022_rst_all();
 	#ifdef debug_LPWA
 		debug("\r\nTimeout finished! LPWA.status: %d", LPWA.status);
 	#endif

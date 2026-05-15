@@ -122,10 +122,10 @@ void Error_Handler(void);
 #define		n_blocks_LPWA			10		// Nb -> Transmit data when XX blocks are acquired //TODO: Evaluate its modification on the configuring tool
 #define		n_blocks_LPWA_limit		4		// If n_blocks_LPWA is higher than this value LPWA will power off
 
-#define		max_blocks_LPWA			40		// Maximum number of blocks that can be transmitted in a single connection
+#define		max_blocks_LPWA			50		// Maximum number of blocks that can be transmitted in a single connection
 #define		block_len				(n_bytes_header + n_bytes_payload + ((block_payloads - 1) * n_bytes_payload_delta))
 
-#define 	main_buffer_size		40		//Main buffer number of blocks
+#define 	main_buffer_size		100		//Main buffer number of blocks
 
 #define 	buffer_lwpa_config_size 200
 #define		eeprom_size				8191	//Size in pages number

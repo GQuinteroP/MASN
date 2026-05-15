@@ -45,8 +45,8 @@ extern volatile uint8_t bitmask_ready;
 #define		lpwa_err_lim_rst	5	//Times an error (not related to server or network) can occur before reset
 #define		lpwa_err_lim_tout	2	//Times an error related to server or network can occur before timeout
 
-#define		lwpa_short_timeout	30000
-#define		lwpa_long_timeout	2*60000//3600000
+#define		lwpa_short_timeout	60000
+#define		lwpa_long_timeout	10*lwpa_short_timeout//3600000
 
 struct LWPA_error {
   uint8_t S7022_AT;
