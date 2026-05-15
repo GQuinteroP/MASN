@@ -103,7 +103,7 @@ typedef enum
 uint8_t S7022_PROCESS_Rx(struct BUFF_G *LPWA_rcv_msgs, uint8_t r_type, const char *expected_resp);
 int8_t S7022_SCAN_Rx(struct BUFF_G *LPWA_rcv_msgs, char *expected_resp, char *scan_str, uint8_t *result);
 //uint8_t S7022_Confirm_Rx(uint8_t buffer[max_blocks_LPWA][block_len], uint8_t conf_vector[max_blocks_LPWA]);
-uint8_t S7022_Confirm_Rx(uint8_t buffer[max_blocks_LPWA][block_len]);
+void S7022_Confirm_Rx(uint8_t buffer[max_blocks_LPWA][block_len]);
 
 uint8_t S7022_SEND_CMD(const uint8_t *cmd, uint8_t data_len,  uint8_t resp_buff[3][100], uint16_t timeout);
 int8_t S7022_SEND_CMD_NEW(const uint8_t *cmd, uint8_t data_len);

@@ -16,7 +16,7 @@ struct LWPA_def LPWA = {.S7022_COAPOPEN=0,.S7022_COAPSTART=0,.operator=0, .statu
 						.S7022_COAPOPTION=0, .S7022_COAPSENDTX=0}};
 
 const uint8_t	method[5] 	=	"put";
-const uint8_t	coap_path[9] = "TEST";	//The token of CoAP message
+const uint8_t	coap_path[9] = "LPWGNS";	//The token of CoAP message
 const uint8_t	operator_list[3][6] = {"21403", "21401", "21407"};
 
 //const uint8_t	coap_msgid = 0;	//The CoAP message ID,the range is 0 to 65535
@@ -209,17 +209,27 @@ uint8_t S7022_PROCESS_Rx(struct BUFF_G *LPWA_rcv_msgs, uint8_t r_type, const cha
 						uint8_t delta = 0;
 						while(resp_i)
 						{
-							delta = (uint8_t) (resp_i - &tmp[local_ctr]);
-							MAIN_Queue_put(LPWA_rcv_msgs, (uint8_t *) &tmp[local_ctr], delta);
-							local_ctr += (uint8_t) (delta);
+							delta = (uint8_t) (resp_i - (char*)&tmp[local_ctr]);
+							if (delta > 0 && delta < LPWA_rx_len) {
+								MAIN_Queue_put(LPWA_rcv_msgs, (uint8_t *) &tmp[local_ctr], delta);
+							}
+							local_ctr += delta;
 
-							#ifdef debug_LPWA
-								debug("\r\n[S7022_PROCESS_Rx] Double:%d", local_ctr);
-							#endif
-							resp_i= strstr(&tmp[local_ctr+4], "\r\n\r\n");
+							// Evitamos salirnos de la memoria si local_ctr+4 es mayor al array
+							if ((local_ctr + 4) < strlen(tmp)) {
+								resp_i = strstr(&tmp[local_ctr+4], "\r\n\r\n");
+							} else {
+								resp_i = NULL;
+							}
 						}
-						delta = (uint8_t) strlen(tmp) - local_ctr - 4;
-						MAIN_Queue_put(LPWA_rcv_msgs, (uint8_t *) &tmp[local_ctr+4], delta);
+
+						// Blindaje contra underflow matemático
+						int16_t remaining_len = (int16_t)strlen(tmp) - (int16_t)local_ctr - 4;
+						if (remaining_len > 0 && remaining_len < LPWA_rx_len)
+						{
+							delta = (uint8_t)remaining_len;
+							MAIN_Queue_put(LPWA_rcv_msgs, (uint8_t *) &tmp[local_ctr+4], delta);
+						}
 
 						memset(tmp, 0, LPWA_rx_len);
 						buff_len = LPWA_rcv_msgs->bufferLength;
@@ -397,7 +407,7 @@ int8_t S7022_SCAN_Rx(struct BUFF_G *LPWA_rcv_msgs, char *expected_resp, char *sc
 	return n_resp;
 }*/
 
-uint8_t S7022_Confirm_Rx(uint8_t buffer[max_blocks_LPWA][block_len])
+void S7022_Confirm_Rx(uint8_t buffer[max_blocks_LPWA][block_len])
 {
 	float32_t code = 1.1;
 	uint8_t id = 99;

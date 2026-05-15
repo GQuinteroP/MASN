@@ -119,7 +119,7 @@ void Error_Handler(void);
 #define 	n_bytes_payload			33		// Base payload size (1st sample)
 #define 	n_bytes_payload_delta	27		// Compressed delta payload size (subsequent samples)
 #define		block_payloads			8		// Np -> 1 header + 1 base payload + 7 delta payloads (237 bytes total). Limited by SIM7022 since only 255 bytes can be sent in one round
-#define		n_blocks_LPWA			10		// Nb -> Transmit data when XX blocks are acquired //TODO: Evaluate its modification on the configuring tool
+#define		n_blocks_LPWA			60		// Nb -> Transmit data when XX blocks are acquired //TODO: Evaluate its modification on the configuring tool
 #define		n_blocks_LPWA_limit		4		// If n_blocks_LPWA is higher than this value LPWA will power off
 
 #define		max_blocks_LPWA			50		// Maximum number of blocks that can be transmitted in a single connection

@@ -201,7 +201,7 @@ const osThreadAttr_t gnss_task_attributes = { .name = "gnss_task", .stack_size =
 		.priority = (osPriority_t) osPriorityNormal,};
 
 const osThreadAttr_t data_send_task_attributes = { .name = "task_data_send", .stack_size = 512 * 4,
-		.priority = (osPriority_t) osPriorityNormal,};
+		.priority = (osPriority_t) osPriorityNormal + 1,};
 
 /*const osThreadAttr_t data_store_task_attributes = { .name = "task_data_store", .stack_size = 512 * 4,
 		.priority = (osPriority_t) osPriorityNormal,};*/
@@ -345,9 +345,10 @@ uint16_t gps_str_len = 0;
 struct BUFF_GPS GNSS;
 
 //LPWA
-
-const uint8_t	server_IP[15] =	"127.0.0.1";
-const uint16_t	server_port = 5435;
+const uint8_t	server_IP[15] =	"147.83.83.90";
+const uint16_t	server_port = 5683;
+//const uint8_t	server_IP[15] =	"127.0.0.1";
+//const uint16_t	server_port = 5435;
 
 
 uint8_t buffer_lpwa[250];		//Buffer for storing characters received (Higher than queue to avoid overflow)
@@ -1494,7 +1495,7 @@ void task_data_rcv(void *argument)
 			osSemaphoreAcquire(sem_process_LPWAHandle, osWaitForever);
 			vTaskDelay(10);	//10 - To wait for the rest of the string
 			timeout_ctr=0;
-			while( (buffer_lpwa[counter_lpwa]!='\r') & (buffer_lpwa[counter_lpwa+1]!='\n') & (timeout_ctr<10))
+			while( (buffer_lpwa[counter_lpwa]!='\r') && (buffer_lpwa[counter_lpwa+1]!='\n') && (timeout_ctr<10))
 			{
 				vTaskDelay(1);
 				timeout_ctr++;
@@ -1594,6 +1595,10 @@ void task_data_send(void *argument)
 					S7022_COAPSENDTX(escaped_payload, final_len, 5000);
 					vTaskDelay(200);
 				}
+				#ifdef debug_LPWA
+					else
+						debug("\r\n[task_data_send] final_len>255!");
+				#endif
 			}
 		}
 	}
@@ -2842,8 +2847,8 @@ void task_main(void *argument)
 
 	load_config(&cal, &gps_enabled, &lpwa_enabled, &octave, &RecTime, &LeqTime);
 
-	//LeqTime = 0;
-	gps_enabled = false;
+	LeqTime = 0;
+	//gps_enabled = false;
 	//lpwa_enabled = false;
 
 	/*WRITE_ENABLE();
