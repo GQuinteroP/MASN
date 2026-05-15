@@ -1,0 +1,12 @@
+../Core/Src/MAX-M10S.c:10:11:nmeaToDec	40	static
+../Core/Src/MAX-M10S.c:22:6:M10Schecksum	24	static
+../Core/Src/MAX-M10S.c:35:6:M10ProcessPackets	72	static
+../Core/Src/MAX-M10S.c:90:6:M10ZDA	48	static
+../Core/Src/MAX-M10S.c:105:6:M10ChangeBaudrate	48	static
+../Core/Src/MAX-M10S.c:116:6:M10DisableAll	128	static
+../Core/Src/MAX-M10S.c:130:6:M10GGAOnly	128	static
+../Core/Src/MAX-M10S.c:145:6:M10PSMCT_RAM	40	static
+../Core/Src/MAX-M10S.c:157:6:M10PSMOO_RAM	40	static
+../Core/Src/MAX-M10S.c:164:6:M10PSMCT_BBR	40	static
+../Core/Src/MAX-M10S.c:171:6:M10ChangeUpdateRate	48	static
+../Core/Src/MAX-M10S.c:177:6:M10Reset	40	dynamic

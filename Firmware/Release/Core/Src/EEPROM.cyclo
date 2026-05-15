@@ -1,0 +1,2 @@
+../Core/Src/EEPROM.c:12:10:get_eeprom_data_len	6
+../Core/Src/EEPROM.c:44:10:get_eeprom_read_idx	3

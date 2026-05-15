@@ -15392,7 +15392,7 @@
 				)
 			)
 		)
-		(property "Value" "USB4500-03-0-A"
+		(property "Value" "USB-310CA"
 			(at 41.91 123.19 0)
 			(effects
 				(font
@@ -15400,7 +15400,7 @@
 				)
 			)
 		)
-		(property "Footprint" "GCT_USB4500-03-0-A_REVA"
+		(property "Footprint" "Customs:USB-C-SMD_20P-P0.50-L6.5-W11.2"
 			(at 41.91 139.7 0)
 			(effects
 				(font

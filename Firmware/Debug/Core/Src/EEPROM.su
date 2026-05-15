@@ -1,0 +1,2 @@
+../Core/Src/EEPROM.c:12:10:get_eeprom_data_len	24	static
+../Core/Src/EEPROM.c:44:10:get_eeprom_read_idx	16	static

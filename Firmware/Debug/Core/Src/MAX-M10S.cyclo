@@ -1,0 +1,12 @@
+../Core/Src/MAX-M10S.c:10:11:nmeaToDec	3
+../Core/Src/MAX-M10S.c:22:6:M10Schecksum	2
+../Core/Src/MAX-M10S.c:35:6:M10ProcessPackets	19
+../Core/Src/MAX-M10S.c:90:6:M10ZDA	2
+../Core/Src/MAX-M10S.c:105:6:M10ChangeBaudrate	1
+../Core/Src/MAX-M10S.c:116:6:M10DisableAll	1
+../Core/Src/MAX-M10S.c:130:6:M10GGAOnly	1
+../Core/Src/MAX-M10S.c:145:6:M10PSMCT_RAM	1
+../Core/Src/MAX-M10S.c:157:6:M10PSMOO_RAM	1
+../Core/Src/MAX-M10S.c:164:6:M10PSMCT_BBR	1
+../Core/Src/MAX-M10S.c:171:6:M10ChangeUpdateRate	1
+../Core/Src/MAX-M10S.c:177:6:M10Reset	1
