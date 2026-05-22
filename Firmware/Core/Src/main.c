@@ -203,8 +203,8 @@ const osThreadAttr_t gnss_task_attributes = { .name = "gnss_task", .stack_size =
 const osThreadAttr_t data_send_task_attributes = { .name = "task_data_send", .stack_size = 512 * 4,
 		.priority = (osPriority_t) osPriorityNormal + 1,};
 
-/*const osThreadAttr_t data_store_task_attributes = { .name = "task_data_store", .stack_size = 512 * 4,
-		.priority = (osPriority_t) osPriorityNormal,};*/
+const osThreadAttr_t data_store_task_attributes = { .name = "task_data_store", .stack_size = 512 * 4,
+		.priority = (osPriority_t) osPriorityNormal,};
 
 RTC_TimeTypeDef rtc_time;
 RTC_DateTypeDef rtc_date;
@@ -250,16 +250,17 @@ uint8_t octave = true;  //'True' or 'false' calculate octave bands
 //Variables
 time_t endTime;     //End time of recording
 uint8_t start=false;   //Flag to keep track of measuring status
-//uint8_t	sampling_buffer[fast_125ms*4]; // fast_125ms samples of 32 bits (4 bytes) - 24 bits data
 
+//uint8_t	sampling_buffer[fast_125ms*4]; // fast_125ms samples of 32 bits (4 bytes) - 24 bits data
 uint8_t	sampling_buffer[fast_125ms*4] __attribute__((section(".ram2_data")));
 
 //float32_t working_buffer[fast_125ms + 96] = {0} ;
 float32_t working_buffer[fast_125ms + 96] __attribute__((section(".ram2_data")));
 
-float32_t aux_low_freqs[4][250];
 //float32_t acc_dec_buffer[fast_125ms + 96] = {0};
 float32_t acc_dec_buffer[fast_125ms + 96] __attribute__((section(".ram2_data")));
+
+float32_t aux_low_freqs[4][250];
 uint8_t acc_dec_ctr = 0;
 time_t seconds =  0;
 
@@ -295,7 +296,7 @@ int16_t eeprom_write_idx = 0;
 uint8_t eeprom_aux_buffer[M95P32_PAGESIZE];
 
 osThreadId_t data_send_taskHandle;
-//osThreadId_t data_store_taskHandle;
+osThreadId_t data_store_taskHandle;
 osThreadId_t data_rcv_taskHandle;
 
 //DSP
@@ -323,6 +324,7 @@ float32_t LeqSecondsTOB[NFilters][60];  //60 seconds values
 float32_t LeqAuxTOB[NFilters];    //Leq value computed for third octave bands to be saved
 float32_t LeqMinutes[60];  // 60 minutes values
 float32_t LeqMinutesTOB[NFilters][60];  // 60 minutes values
+uint8_t LeqSecondsCount=0;  //Count of number of obtained seconds
 
 #ifdef IIR_DEC
 	uint8_t LeqFastTOBCount=0;     //Number of fast samples taken for third Octave Band
@@ -402,7 +404,6 @@ float32_t out_counter = 0;
 #ifdef IIR_DEBUG
 	uint8_t LeqFastTOBCount=0;     //Number of fast samples taken for third Octave Band
 	arm_biquad_cascade_df2T_instance_f32 iirDec;
-	uint8_t LeqSecondsCount=0;  //Count of number of seconds got
 #endif
 /* USER CODE END PV */
 
@@ -1444,34 +1445,37 @@ osStatus_t eeprom_read(uint8_t *data_out, uint8_t clear)
 	return osOK;
 }
 
-/*void task_data_store(void *argument)
+void task_data_store(uint8_t *argument)
 {
-	uint32_t total_blocks = (uint32_t) argument;
-	uint8_t curr_size = (uint8_t) (total_blocks / 2);
+	uint8_t	 curr_size = (uint8_t) ((uint8_t) *argument)/2;
 	uint8_t tmp_buffer[block_len*2];
+
+	#ifdef DEBUG
+		debug("\r\n*[task_data_store] curr_size: %d!", curr_size);
+	#endif
 
 	for(int ii=0; ii<curr_size; ii++)
 	{
-		if(osMutexAcquire(mutex_bufferHandle, 100) == osOK)
-		{
-			MAIN_Queue_get(&BUFF_main, &tmp_buffer[0]);
-			MAIN_Queue_get(&BUFF_main, &tmp_buffer[block_len]);
-			osMutexRelease(mutex_bufferHandle);
-
-			eeprom_write(tmp_buffer);
-		}
+		memcpy(&tmp_buffer[0], &leqs_buffer_LWPA[ii*2][0], block_len);
+		memcpy(&tmp_buffer[block_len], &leqs_buffer_LWPA[(ii*2) + 1][0], block_len);
+		eeprom_write(tmp_buffer);
 	}
-
 	#ifdef LOW_POWER
-		if((USB_plugged == 0) & (LPWA.status != 2))
+		//-- Power saving --//
+		if((USB_plugged == 0) & (LPWA.status !=2))
 		{
 			HAL_SuspendTick();
 			HAL_PWR_EnterSLEEPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFI);
 		}
 	#endif
 
-	osThreadExit(); // Destrucción segura del hilo
-}*/
+	#ifdef DEBUG
+		debug("\r\n*[task_data_store] TERMINATED!");
+	#endif
+
+	osThreadExit();
+	vTaskDelete(data_store_taskHandle);
+}
 
 void task_data_rcv(void *argument)
 {
@@ -1919,12 +1923,14 @@ void task_IoT(void *argument)
 
 void flush_main_buffer_to_eeprom(uint32_t total_blocks)
 {
-    // Aseguramos que sea par para extraer de 2 en 2
+
     total_blocks &= ~1;
     uint8_t curr_size = (uint8_t) (total_blocks / 2);
-
-    // Búfer local en el stack de quien llame a la función
     uint8_t tmp_buffer[block_len * 2];
+
+	#ifdef debug_EEPROM
+    	debug("\r\n[flush_main_buff] started!");
+	#endif
 
     for(int ii = 0; ii < curr_size; ii++)
     {
@@ -1934,16 +1940,20 @@ void flush_main_buffer_to_eeprom(uint32_t total_blocks)
             MAIN_Queue_get(&BUFF_main, &tmp_buffer[block_len]);
             osMutexRelease(mutex_bufferHandle);
 
-            // Escribimos a la EEPROM
             eeprom_write(tmp_buffer);
         }
     }
+	#ifdef debug_EEPROM
+    	debug("\r\n[flush_main_buff] finished!");
+	#endif
 }
 
 void task_offline(void *argument)
 {
 	/* USER CODE BEGIN task_offline */
-	debug("\r\n[Offline TASK] Offline TASK!");
+	#ifdef debug_offline
+		debug("\r\n[Offline TASK] Offline TASK!");
+	#endif
 	int16_t send_buffer_length = 0;
 	osSemaphoreRelease(sem_initHandle);
 	/* Infinite loop */
@@ -1952,22 +1962,22 @@ void task_offline(void *argument)
 		osSemaphoreAcquire(sem_send_dataHandle, osWaitForever);
 		if(osMutexAcquire(mutex_bufferHandle,100)==osOK)
 		{
-			#ifdef debug_coding
-				for(int ii=0; ii<block_len;ii++)
-					debug("%02x,", leqs_buffer_acq1[ii]);
+			#ifdef debug_offline
+				//for(int ii=0; ii<block_len;ii++)
+					//debug("%02x,", leqs_buffer_acq1[ii]);
 			#endif
 			MAIN_Queue_put(&BUFF_main, buff_addr_snd, block_len);
 		}
-		#ifdef debug_LPWA
+		#ifdef debug_offline
 			else
 				debug("\r\n*[Offline TASK] Error obtaining mutex_buffer (MAIN_Queue_put(&BUFF_main, buff_addr_snd, block_len))");
 		#endif
 
 		send_buffer_length = BUFF_main.bufferLength;
 		osMutexRelease(mutex_bufferHandle);
-
-		debug("\r\n*[Offline TASK] BUFF_main r_idx:%d - w_idx:%d - len: %d\r\n", BUFF_main.readIndex, BUFF_main.writeIndex, BUFF_main.bufferLength);
-
+		#ifdef debug_offline
+			debug("\r\n*[Offline TASK] BUFF_main r_idx:%d - w_idx:%d - len: %d\r\n", BUFF_main.readIndex, BUFF_main.writeIndex, BUFF_main.bufferLength);
+		#endif
 		if(send_buffer_length>=n_blocks_EEPROM)
 		{
 			if(osMutexAcquire(mutex_bufferHandle,100)==osOK)
@@ -1975,10 +1985,10 @@ void task_offline(void *argument)
 				for(int ii=0;ii<send_buffer_length;ii++)
 					MAIN_Queue_get(&BUFF_main, &leqs_buffer_LWPA[ii][0]);
 				osMutexRelease(mutex_bufferHandle);
-				//data_store_taskHandle = osThreadNew((void *)task_data_store, (void *) &send_buffer_length, &data_store_task_attributes);
-				flush_main_buffer_to_eeprom(send_buffer_length);
+				data_store_taskHandle = osThreadNew((void *)task_data_store, (void *) &send_buffer_length, &data_store_task_attributes);
+				//flush_main_buffer_to_eeprom(send_buffer_length);
 			}
-			#ifdef debug_LPWA
+			#ifdef debug_offline
 			else
 				debug("\r\n*[Offline TASK] Error obtaining mutex_buffer! (send_buffer_length>=n_blocks_EEPROM)");
 			#endif
@@ -2526,7 +2536,9 @@ void startSampling()
 		while((GPS.lock < 1) || (sync_rtc_time == -1))
 		{
 			uint32_t seconds =  rtc_read();
-			debug("Waiting valid GNSS signal and RTC sync: %d - %d!\r\n", GPS.lock, seconds - seconds_init);
+			#ifdef debug_GNSS
+				debug("Waiting valid GNSS signal and RTC sync: %d - %d!\r\n", GPS.lock, seconds - seconds_init);
+			#endif
 			red_led(GPIO_PIN_SET);
 			vTaskDelay(1000);
 		}
@@ -2847,9 +2859,12 @@ void task_main(void *argument)
 
 	load_config(&cal, &gps_enabled, &lpwa_enabled, &octave, &RecTime, &LeqTime);
 
-	LeqTime = 0;
-	//gps_enabled = false;
+	//LeqTime = 0;
+	gps_enabled = false;
 	//lpwa_enabled = false;
+
+	if (lpwa_enabled == true && LeqTime > 1)//Online mode only 125ms/1s
+		LeqTime = 1;
 
 	/*WRITE_ENABLE();
 	Chip_Erase();
@@ -2857,6 +2872,7 @@ void task_main(void *argument)
 	#ifdef debug_USB
 		debug("\r\nChip_Erase");
 	#endif*/
+
 	eeprom_init_queue();
 	debug("\r\nData_len: %d", get_eeprom_data_len());
 
@@ -2914,7 +2930,7 @@ void task_main(void *argument)
 		// --- DYNAMIC IMEI EXTRACTION ON BOOT ---
 	if (lpwa_enabled == true)
 	{
-		// 1. Wake up the modem to request the IMEI
+		//Wake up the modem to request the IMEI
 		LPWA_enable();
 
 		// Enable data queuing for AT commands
@@ -3183,16 +3199,15 @@ void task_signal_processing(void *argument)
 		}
 
 		LeqFastCount++;
-		if (LeqTime == 0) // --- MODO FAST (125 ms) ---
+		if (LeqTime == 0)
 		{
-			// Liberamos georeferencia en CADA ciclo de 125ms
 			task_state = GEOREF;
 			osSemaphoreRelease(sem_georefHandle);
 
 			if (LeqFastCount >= 8)
 			{
 				LeqFastCount = 0;
-				seconds = rtc_read(); // Actualiza la base de tiempo para el próximo bloque
+				seconds = rtc_read();
 				red_led(GPIO_PIN_SET);
 			}
 			else if (LeqFastCount == 4)
@@ -3200,30 +3215,45 @@ void task_signal_processing(void *argument)
 				red_led(GPIO_PIN_RESET);
 			}
 
-			// Revisamos inmediatamente si el encode() llenó el bloque (8 muestras)
 			if (task_state == DOUT)
 			{
 				task_state = WAIT;
 				osSemaphoreRelease(sem_send_dataHandle);
 			}
 		}
-		else // --- MODO SLOW (1 segundo) ---
+		else
 		{
-			if(LeqFastCount>=8)
+			if(LeqFastCount >= 8)
 			{
-				LeqFastCount=0;
-				LeqSeconds[0]=Leq(LeqFastSamples, NLeqSlow);   //Compute 1s Leq and save it in global seconds var
-				task_state = GEOREF;
-				red_led(GPIO_PIN_SET);
-				#ifdef LOW_POWER
-					////------ Power saving ---////
-					if((USB_plugged == 0) & (LPWA.status !=2))
-					{
-						HAL_SuspendTick();
-						HAL_PWR_EnterSLEEPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFI);
-					}
-				#endif
-			}else
+			    LeqFastCount = 0;
+			    LeqSeconds[LeqSecondsCount] = Leq(LeqFastSamples, NLeqSlow);
+			    if(octave)
+			    {
+			        for(int i = 0; i < NFilters; i++)
+			        {
+
+			            LeqSecondsTOB[i][LeqSecondsCount] = Leq(LeqFastTOB[i], NLeqSlow);
+			        }
+			    }
+
+			    LeqSecondsCount++;
+
+			    if(LeqSecondsCount >= LeqTime)
+			    {
+			        task_state = GEOREF;
+			        red_led(GPIO_PIN_SET);
+			        //osSemaphoreRelease(sem_georefHandle);
+			    } else {
+			        red_led(GPIO_PIN_SET);
+			        #ifdef LOW_POWER
+			            if((USB_plugged == 0) & (LPWA.status !=2))
+			            {
+			                HAL_SuspendTick();
+			                HAL_PWR_EnterSLEEPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFI);
+			            }
+			        #endif
+			    }
+			} else
 			{
 				switch(LeqFastCount)
 				{
@@ -3306,19 +3336,22 @@ void task_georeferencing(void *argument)
 		//HAL_GPIO_TogglePin(STATUS_LED_GPIO_Port, STATUS_LED_Pin);
 		auxSave++;
 
-		if(LeqTime>1)
+		if(LeqTime >= 1) // SLOW (1s or more)
 		{
+			// Energetic average calculation automatically handles 1 or more seconds
+			float32_t final_Leq = Leq(LeqSeconds, LeqTime);
 
+			for(int i = 0; i < NFilters; i++) {
+				LeqAuxTOB[i] = Leq(LeqSecondsTOB[i], LeqTime);
+			}
+
+			encode(final_Leq, LeqAuxTOB);
+
+			// CRITICAL FIX: Reset counter for the next accumulation cycle
+			LeqSecondsCount = 0;
 		}
-		else if (LeqTime == 1) // MODO SLOW (1s)
+		else if (LeqTime == 0) // FAST (125ms)
 		{
-			for(int i=0;i<NFilters;i++)
-				LeqAuxTOB[i] = LeqSecondsTOB[i][0];
-			encode(LeqSeconds[0], LeqAuxTOB);
-		}
-		else if (LeqTime == 0) // MODO FAST (125ms)
-		{
-			// Ubicamos el índice del arreglo que signal_processing acaba de escribir
 			uint8_t idx = (LeqFastCount == 0) ? 7 : (LeqFastCount - 1);
 
 			for(int i=0;i<NFilters;i++)

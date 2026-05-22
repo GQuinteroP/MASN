@@ -119,17 +119,17 @@ void Error_Handler(void);
 #define 	n_bytes_payload			33		// Base payload size (1st sample)
 #define 	n_bytes_payload_delta	27		// Compressed delta payload size (subsequent samples)
 #define		block_payloads			8		// Np -> 1 header + 1 base payload + 7 delta payloads (237 bytes total). Limited by SIM7022 since only 255 bytes can be sent in one round
-#define		n_blocks_LPWA			60		// Nb -> Transmit data when XX blocks are acquired //TODO: Evaluate its modification on the configuring tool
+#define		n_blocks_LPWA			4		// Nb -> Transmit data when XX blocks are acquired //TODO: Evaluate its modification on the configuring tool
 #define		n_blocks_LPWA_limit		4		// If n_blocks_LPWA is higher than this value LPWA will power off
 
 #define		max_blocks_LPWA			50		// Maximum number of blocks that can be transmitted in a single connection
 #define		block_len				(n_bytes_header + n_bytes_payload + ((block_payloads - 1) * n_bytes_payload_delta))
 
-#define 	main_buffer_size		100		//Main buffer number of blocks
+#define 	main_buffer_size		20		//Main buffer number of blocks
 
 #define 	buffer_lwpa_config_size 200
 #define		eeprom_size				8191	//Size in pages number
-#define 	n_blocks_full_buffer 	((uint8_t)((main_buffer_size * 8) / 10))	//Specify when the main buffer (packets) is full, then write data down to EEPROM
+#define 	n_blocks_full_buffer 	((uint8_t)((main_buffer_size * 5) / 10))	//Specify when the main buffer (packets) is full, then write data down to EEPROM
 #define		n_blocks_EEPROM			4		//Number of blocks required to perform a EEPROM write (offline task)
 #define 	temp_tests				72.8
 
@@ -151,11 +151,15 @@ void Error_Handler(void);
 
 #define		LOW_FREQ		//Enable processor's clock frequency reduction when no USB is detected
 //#define		NO_MIC				//Use sine signal instead of MIC
+
 #define		debug_GNSS		0//Print GNSS information (0 - Only NGGA string, 1 - Time, Lat, Lon, Lock, and Sat)
 //#define		debug_coding
 #define		debug_USB
 #define		debug_LPWA
+#define		debug_EEPROM
 #define		debug_Leq		0//Print Leq timing, TOB_LF (0), TOB (1) and LPWA (2)
+#define		debug_offline
+
 
 //#define		IIR_DEBUG	//Test old pars
 

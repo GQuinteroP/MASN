@@ -46,7 +46,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h \
- /home/ubuntu/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h \
+ /home/guillermo/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h \
  ../Drivers/CMSIS/Include/cmsis_compiler.h ../Core/Inc/PondFilter.h \
  ../Core/Inc/ThirdOctave.h ../Core/Inc/Custom_DSP.h \
  ../USB_DEVICE/App/usbd_cdc_if.h \
@@ -110,7 +110,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h:
-/home/ubuntu/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h:
+/home/guillermo/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h:
 ../Drivers/CMSIS/Include/cmsis_compiler.h:
 ../Core/Inc/PondFilter.h:
 ../Core/Inc/ThirdOctave.h:

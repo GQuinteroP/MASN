@@ -47,7 +47,7 @@ Core/Src/SIMCOM7022.o: ../Core/Src/SIMCOM7022.c ../Core/Inc/SIMCOM7022.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h \
  ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h \
  ../Core/Inc/main.h \
- /home/ubuntu/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h \
+ /home/guillermo/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h \
  ../Drivers/CMSIS/Include/cmsis_compiler.h
 ../Core/Inc/SIMCOM7022.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os.h:
@@ -98,5 +98,5 @@ Core/Src/SIMCOM7022.o: ../Core/Src/SIMCOM7022.c ../Core/Inc/SIMCOM7022.h \
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart.h:
 ../Drivers/STM32L4xx_HAL_Driver/Inc/stm32l4xx_hal_uart_ex.h:
 ../Core/Inc/main.h:
-/home/ubuntu/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h:
+/home/guillermo/DRIVE/UPC/Desarrollos/M1\ -\ GNS/MASN/Firmware/Drivers/DSP/Include/arm_math.h:
 ../Drivers/CMSIS/Include/cmsis_compiler.h:
