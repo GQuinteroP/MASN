@@ -136,6 +136,7 @@ void Error_Handler(void);
 #define		cal_def					21.8 //Kind of pre-calibrated value
 #define		cal_def_LF				23 //Kind of pre-calibrated value
 
+#define		gnss_buff_len			255
 #define		usb_buff_len  			50		//Length of USB buffer
 #define		usb_max_n_msg			5		//Max number of USB messages
 #define 	LPWA_rx_def_tout		10		//Interval of waiting time to reach "timeout"

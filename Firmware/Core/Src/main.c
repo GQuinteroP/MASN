@@ -330,17 +330,23 @@ uint8_t LeqSecondsCount=0;  //Count of number of obtained seconds
 	uint8_t LeqFastTOBCount=0;     //Number of fast samples taken for third Octave Band
 #endif
 
-//GPS
+//GNSS
 MAX_M10S GPS;
-uint8_t buffer_gps1[100];
+uint8_t buffer_gps1[gnss_buff_len];
 uint8_t *buffer_gps_tmp1 = buffer_gps1;
-uint8_t buffer_gps2[100];
+uint8_t buffer_gps2[gnss_buff_len];
 uint8_t *buffer_gps_tmp2 = buffer_gps2;
+
+uint8_t gnss_rx_buffer[gnss_buff_len];
+uint16_t    old_pos = 0;
+uint16_t    parse_idx = 0;
+
 struct BUFF_GPS
 {
 	uint8_t *buffer_gps;
 	uint8_t valid;
 };
+
 uint16_t gps_counter = 0;
 uint16_t gps_str_len = 0;
 
@@ -489,7 +495,9 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  uint32_t fpscr = __get_FPSCR();
+    fpscr |= (1UL << 24); // Flush-to-Zero (FZ)
+    __set_FPSCR(fpscr);
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -1159,6 +1167,72 @@ void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 	#endif
 }
 
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    if (huart->Instance == LPUART1)
+    {
+        uint16_t new_data_len = 0;
+
+        /* Calculate how many new bytes arrived since the last IDLE event */
+        if (Size > old_pos)
+        {
+            new_data_len = Size - old_pos;
+            memcpy(&buffer_gps_tmp1[parse_idx], &gnss_rx_buffer[old_pos], new_data_len);
+        }
+        else if (Size < old_pos)
+        {
+            new_data_len = gnss_buff_len - old_pos;
+            memcpy(&buffer_gps_tmp1[parse_idx], &gnss_rx_buffer[old_pos], new_data_len);
+            if (Size > 0)
+            {
+                memcpy(&buffer_gps_tmp1[parse_idx + new_data_len], gnss_rx_buffer, Size);
+                new_data_len += Size;
+            }
+        }
+
+        /* Verify and assemble the received fragment */
+        if (new_data_len > 0)
+        {
+            parse_idx += new_data_len;
+            old_pos = Size;
+
+            /* Prevent assembler overflow */
+            if (parse_idx >= gnss_buff_len)
+            {
+                memset(buffer_gps_tmp1, 0, gnss_buff_len);
+                parse_idx = 0;
+            }
+            /* * NMEA sentences end with Carriage Return '\r' and Line Feed '\n'.
+             * We explicitly check for both to guarantee the string is 100% complete
+             * before waking up the GNSS task.
+             */
+            else if (parse_idx >= 2 &&
+                     buffer_gps_tmp1[parse_idx - 2] == '\r' &&
+                     buffer_gps_tmp1[parse_idx - 1] == '\n')
+            {
+                // Ensure null termination for string processing functions (strstr)
+                buffer_gps_tmp1[parse_idx] = '\0';
+
+                // Swap pointers for double buffering
+                GNSS.buffer_gps = buffer_gps_tmp1;
+                buffer_gps_tmp1 = buffer_gps_tmp2;
+                buffer_gps_tmp2 = GNSS.buffer_gps;
+
+                /* * Crucial: Clear the assembler buffer AFTER swapping pointers
+                 * to prevent phantom characters in the next NMEA burst.
+                 */
+                memset(buffer_gps_tmp1, 0, gnss_buff_len);
+                parse_idx = 0;
+
+                GNSS.valid = true;
+                osSemaphoreRelease(sem_gnssHandle);
+            }
+        }
+    }
+}
+
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	//TODO: MUst be improved so that less processes are performed here
@@ -1172,10 +1246,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 	else
 	{
-		if(huart == &hlpuart1)
+		/*if(huart == &hlpuart1)
 		{
 			if(start==true)
 				HAL_UART_Receive_DMA(huart, &buffer_gps_tmp1[gps_counter], 1);
+
 			if(buffer_gps_tmp1[gps_counter-1]=='$')
 			{
 				buffer_gps_tmp1[gps_counter-1] = 0;
@@ -1187,9 +1262,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 				osSemaphoreRelease(sem_gnssHandle);
 			}
 			else
+			{
 				gps_counter++;
+				if (gps_counter >= gnss_buff_len)
+				{
+					gps_counter = 0;
+				}
+			}
 
-		}else if(huart == &LPWA_UART)
+		}else */if(huart == &LPWA_UART)
 		{
 			if(counter_lpwa==0)
 				osSemaphoreRelease(sem_process_LPWAHandle);
@@ -2530,7 +2611,24 @@ void startSampling()
 				debug("\r\nError baudrate change");
 			#endif
 		}
-		HAL_UART_Receive_DMA(&hlpuart1, (uint8_t*)buffer_gps_tmp1, 1);
+
+		/* Stop active DMA transfers before modifying hardware registers */
+		HAL_UART_DMAStop(&hlpuart1);
+
+		/* Configure DMA for continuous Circular Mode */
+		hlpuart1.hdmarx->Init.Mode = DMA_CIRCULAR;
+		if (HAL_DMA_Init(hlpuart1.hdmarx) != HAL_OK)
+		{
+		    Error_Handler();
+		}
+
+		/* Reset buffer tracker and start Idle-Line detection */
+		old_pos = 0;
+		HAL_UARTEx_ReceiveToIdle_DMA(&hlpuart1, gnss_rx_buffer, gnss_buff_len);
+
+		/* Disable the Half-Transfer (HT) interrupt */
+		__HAL_DMA_DISABLE_IT(hlpuart1.hdmarx, DMA_IT_HT);
+
 		uint32_t seconds_init =  rtc_read();
 
 		while((GPS.lock < 1) || (sync_rtc_time == -1))
@@ -2840,6 +2938,52 @@ void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc)
 	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 	HAL_RTCEx_DeactivateWakeUpTimer(hrtc);
 }
+
+/**
+  * @brief  UART error callback to handle hardware glitches (like Overrun errors).
+  * This prevents the GNSS and LPWA peripherals from freezing permanently.
+  * @param  huart: UART handle
+  * @retval None
+  */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == LPUART1)
+    {
+        /* Clear physical error flags */
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        HAL_UART_DMAStop(huart);
+
+        if(start == true)
+        {
+            /* Reset pointers to prevent assembly faults after recovery */
+            old_pos = 0;
+            parse_idx = 0;
+
+            /* Restart Circular DMA */
+            HAL_UARTEx_ReceiveToIdle_DMA(&hlpuart1, gnss_rx_buffer, gnss_buff_len);
+            __HAL_DMA_DISABLE_IT(hlpuart1.hdmarx, DMA_IT_HT);
+        }
+    }
+    else if (huart->Instance == USART3)
+    {
+        // Clear the Overrun Error (ORE) flag
+        __HAL_UART_CLEAR_OREFLAG(huart);
+
+        // Abort any ongoing DMA transfers
+        HAL_UART_DMAStop(huart);
+
+        // Restart LPWA DMA reception based on the active configuration mode
+        if(LPWGNS_config == true)
+        {
+            HAL_UART_Receive_DMA(huart, buffer_rx, 1);
+        }
+        else
+        {
+            HAL_UART_Receive_DMA(huart, &buffer_lpwa[counter_lpwa], 1);
+        }
+    }
+}
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_task_main */
@@ -2860,7 +3004,7 @@ void task_main(void *argument)
 	load_config(&cal, &gps_enabled, &lpwa_enabled, &octave, &RecTime, &LeqTime);
 
 	//LeqTime = 0;
-	gps_enabled = false;
+	//gps_enabled = false;
 	//lpwa_enabled = false;
 
 	if (lpwa_enabled == true && LeqTime > 1)//Online mode only 125ms/1s
@@ -3207,7 +3351,7 @@ void task_signal_processing(void *argument)
 			if (LeqFastCount >= 8)
 			{
 				LeqFastCount = 0;
-				seconds = rtc_read();
+				seconds++; //seconds = rtc_read();
 				red_led(GPIO_PIN_SET);
 			}
 			else if (LeqFastCount == 4)
@@ -3226,6 +3370,7 @@ void task_signal_processing(void *argument)
 			if(LeqFastCount >= 8)
 			{
 			    LeqFastCount = 0;
+			    seconds++;
 			    LeqSeconds[LeqSecondsCount] = Leq(LeqFastSamples, NLeqSlow);
 			    if(octave)
 			    {
@@ -3258,7 +3403,7 @@ void task_signal_processing(void *argument)
 				switch(LeqFastCount)
 				{
 					case 1:
-						seconds =  rtc_read() + 1;	//TODO: Why is not synchronized with DEBUG? (eliminate + 1)
+						//seconds =  rtc_read() + 1;	//TODO: Why is not synchronized with DEBUG? (eliminate + 1)
 					break;
 
 					case 2:

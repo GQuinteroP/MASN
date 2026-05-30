@@ -377,36 +377,6 @@ int8_t S7022_SCAN_Rx(struct BUFF_G *LPWA_rcv_msgs, char *expected_resp, char *sc
 	return ret;
 }
 
-/*uint8_t S7022_Confirm_Rx(uint8_t buffer[max_blocks_LPWA][block_len], uint8_t conf_vector[max_blocks_LPWA])
-{
-	float32_t code = 1.1;
-	uint8_t id = 99;
-	uint8_t n_resp = 0;
-
-	#ifdef debug_LPWA
-		debug("\r\n[S7022_Confirm_Rx] Started!\r\n");
-	#endif
-
-	S7022_PROCESS_Rx(&BUFF_LPWA, 2, resp_dummy); //To check if any confirmation stills in buffer
-	while(S7022_rx_get(&LPWA_confirm_msgs, &code, &id) == osOK)
-	{
-		if(code == 2.01f || code == 2.03f)	//2.01-Created, 2.03-Valid (Already exists), 4.09-When error
-		{
-			conf_vector[id] = 1;
-			#ifdef debug_LPWA
-				debug("\r\n[S7022_Confirm_Rx] code:%1.2f - id: %d", code, id);
-			#endif
-			S7022_rst_ind_err(&LPWA.errors.S7022_SERVER_RESP);
-		}else
-			#ifdef debug_LPWA
-				debug("\r\n[S7022_Confirm_Rx] code (Not managed):%1.2f - id: %d", code, id);
-			#endif
-	}
-	for(uint8_t jj=0; jj<max_blocks_LPWA; jj++)
-		n_resp +=conf_vector[jj];
-	return n_resp;
-}*/
-
 void S7022_Confirm_Rx(uint8_t buffer[max_blocks_LPWA][block_len])
 {
 	float32_t code = 1.1;

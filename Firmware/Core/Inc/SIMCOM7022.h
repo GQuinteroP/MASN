@@ -69,7 +69,7 @@ struct LWPA_def
   int8_t S7022_CEREG;		//Flag - network attachment connection ([4] - P: 26/257)
   int8_t coap_id;			//Retrieved after executing COAPOPEN
   uint8_t operator;			//Selected operator
-  uint8_t status;			//LWPA status: 0 - active / 1 - timed out (15s) / 2 - Sending data / 3 - Disabled / 4 - Starting
+  uint8_t status;			//LWPA status: 0 - active / 1 - timed out  / 2 - Sending data / 3 - Disabled / 4 - Starting
   struct LWPA_error errors;
 };
 
