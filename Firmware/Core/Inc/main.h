@@ -136,7 +136,7 @@ void Error_Handler(void);
 #define		cal_def					21.8 //Kind of pre-calibrated value
 #define		cal_def_LF				23 //Kind of pre-calibrated value
 
-#define		gnss_buff_len			255
+#define		gnss_buff_len			2048
 #define		usb_buff_len  			50		//Length of USB buffer
 #define		usb_max_n_msg			5		//Max number of USB messages
 #define 	LPWA_rx_def_tout		10		//Interval of waiting time to reach "timeout"
@@ -154,13 +154,12 @@ void Error_Handler(void);
 //#define		NO_MIC				//Use sine signal instead of MIC
 
 #define		debug_GNSS		0//Print GNSS information (0 - Only NGGA string, 1 - Time, Lat, Lon, Lock, and Sat)
-//#define		debug_coding
+#define		debug_coding
 #define		debug_USB
 #define		debug_LPWA
 #define		debug_EEPROM
 #define		debug_Leq		0//Print Leq timing, TOB_LF (0), TOB (1) and LPWA (2)
 #define		debug_offline
-
 
 //#define		IIR_DEBUG	//Test old pars
 

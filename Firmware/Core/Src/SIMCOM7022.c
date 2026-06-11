@@ -16,7 +16,7 @@ struct LWPA_def LPWA = {.S7022_COAPOPEN=0,.S7022_COAPSTART=0,.operator=0, .statu
 						.S7022_COAPOPTION=0, .S7022_COAPSENDTX=0}};
 
 const uint8_t	method[5] 	=	"put";
-const uint8_t	coap_path[9] = "LPWGNS";	//The token of CoAP message
+const uint8_t	coap_path[9] = "TEST";	//The token of CoAP message
 //const uint8_t	operator_list[3][6] = {"21403", "21401", "21407"}; //SPAIN
 const uint8_t	operator_list[3][7] = {"732123", "732103", "732123"}; //COLOMBIA
 //const uint8_t	coap_msgid = 0;	//The CoAP message ID,the range is 0 to 65535

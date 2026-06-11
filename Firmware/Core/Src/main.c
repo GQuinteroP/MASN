@@ -89,7 +89,7 @@ osThreadId_t signal_processiHandle;
 const osThreadAttr_t signal_processi_attributes = {
   .name = "signal_processi",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
+  .priority = (osPriority_t) osPriorityAboveNormal,
 };
 /* Definitions for georeferencing_ */
 osThreadId_t georeferencing_Handle;
@@ -178,6 +178,11 @@ osSemaphoreId_t sem_process_LPWAHandle;
 const osSemaphoreAttr_t sem_process_LPWA_attributes = {
   .name = "sem_process_LPWA"
 };
+/* Definitions for sem125_counting */
+osSemaphoreId_t sem125_countingHandle;
+const osSemaphoreAttr_t sem125_counting_attributes = {
+  .name = "sem125_counting"
+};
 /* USER CODE BEGIN PV */
 
 /* Definitions for usb_task */
@@ -193,18 +198,32 @@ const osThreadAttr_t IoT_task_attributes = { .name = "IoT_task", .stack_size = 5
 /* Definitions for offline_task */
 osThreadId_t offline_taskHandle;
 const osThreadAttr_t offline_task_attributes = { .name = "offline_task", .stack_size = 512 * 4,
-		.priority = (osPriority_t) osPriorityNormal,};
+		.priority = (osPriority_t) osPriorityBelowNormal,};
 
 /* Definitions for gnss_task */
 osThreadId_t gnss_taskHandle;
-const osThreadAttr_t gnss_task_attributes = { .name = "gnss_task", .stack_size = 512 * 4,
+const osThreadAttr_t gnss_task_attributes = { .name = "gnss_task", .stack_size = 2048 * 4,
 		.priority = (osPriority_t) osPriorityNormal,};
 
 const osThreadAttr_t data_send_task_attributes = { .name = "task_data_send", .stack_size = 512 * 4,
 		.priority = (osPriority_t) osPriorityNormal + 1,};
 
-const osThreadAttr_t data_store_task_attributes = { .name = "task_data_store", .stack_size = 512 * 4,
-		.priority = (osPriority_t) osPriorityNormal,};
+/*const osThreadAttr_t data_store_task_attributes = { .name = "task_data_store", .stack_size = 512 * 4,
+		.priority = (osPriority_t) osPriorityNormal,};*/
+
+/* RTOS resources for DMA-based debug */
+osMutexId_t debug_mutexHandle;
+const osMutexAttr_t debug_mutex_attributes = {
+  .name = "debug_mutex"
+};
+
+osSemaphoreId_t debug_dma_semHandle;
+const osSemaphoreAttr_t debug_dma_sem_attributes = {
+  .name = "debug_dma_sem"
+};
+
+/* Static buffer to prevent memory corruption during DMA transfer */
+static char debug_buffer[256];
 
 RTC_TimeTypeDef rtc_time;
 RTC_DateTypeDef rtc_date;
@@ -273,13 +292,13 @@ uint8_t	sai_half = 0;
 int8_t sync_val = 0;	// Value used to sync the 125 ms since the acquisition seems not multiple of 8 TODO: To be removed
 int32_t sync_rtc_time = -1;
 
-enum STATE
+/*enum STATE
 {
 	WAIT = 0,
 	GEOREF,
 	CODING,
 	DOUT
-} task_state;
+} task_state;*/
 
 //Measurement data
 uint8_t leqs_buffer_acq1[block_len];	//Auxiliary buffer to store 1 block of data
@@ -353,10 +372,8 @@ uint16_t gps_str_len = 0;
 struct BUFF_GPS GNSS;
 
 //LPWA
-const uint8_t	server_IP[15] =	"147.83.83.90";
-const uint16_t	server_port = 5683;
-//const uint8_t	server_IP[15] =	"127.0.0.1";
-//const uint16_t	server_port = 5435;
+const uint8_t	server_IP[15] =	"127.0.0.1";
+const uint16_t	server_port = 5435;
 
 
 uint8_t buffer_lpwa[250];		//Buffer for storing characters received (Higher than queue to avoid overflow)
@@ -456,24 +473,44 @@ void flush_main_buffer_to_eeprom(uint32_t total_blocks);
 /* USER CODE BEGIN 0 */
 void debug(const char *fmt, ...)
 {
-    char buffer[256];
     va_list args;
-    va_start(args, fmt);
-    vsnprintf(buffer, sizeof(buffer), fmt, args);
-    va_end(args);
-    int len = strlen(buffer);
+    int len;
 
     if (osKernelGetState() == osKernelRunning)
     {
-        while(HAL_UART_Transmit(&huart1, (uint8_t*)buffer, len, 50) == HAL_BUSY)
+        /* Acquire mutex to protect the shared static buffer and UART peripheral */
+        if (osMutexAcquire(debug_mutexHandle, osWaitForever) == osOK)
         {
-            osDelay(1);
+            va_start(args, fmt);
+            vsnprintf(debug_buffer, sizeof(debug_buffer), fmt, args);
+            va_end(args);
+
+            len = strlen(debug_buffer);
+
+            /* Transmit in blocking mode with a strict 5 ms timeout */
+            /* Prevents RTOS deadlock if hardware fails */
+            HAL_UART_Transmit(&huart1, (uint8_t*)debug_buffer, len, 5);
+
+            osMutexRelease(debug_mutexHandle);
         }
     }
     else
     {
-        HAL_UART_Transmit(&huart1, (uint8_t*)buffer, len, 1000);
+        /* Fallback for pre-RTOS initialization (Blocking mode) */
+        char local_buffer[256];
+        va_start(args, fmt);
+        vsnprintf(local_buffer, sizeof(local_buffer), fmt, args);
+        va_end(args);
+
+        len = strlen(local_buffer);
+        HAL_UART_Transmit(&huart1, (uint8_t*)local_buffer, len, 1000);
     }
+}
+
+/* UART Tx Complete Callback to unblock the debug function */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+
 }
 
 /* USER CODE END 0 */
@@ -506,7 +543,7 @@ int main(void)
   /* USER CODE BEGIN SysInit */
 	#ifdef LOW_FREQ
 	  MX_GPIO_Init();
-	  MX_USART1_UART_Init();
+	  //MX_USART1_UART_Init();
 
 	  HAL_Delay(100);
 	  SET_BIT(PWR->CR2, PWR_PVM_1);
@@ -573,7 +610,7 @@ int main(void)
   mutex_lpwaHandle = osMutexNew(&mutex_lpwa_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
-	/* add mutexes, ... */
+  debug_mutexHandle = osMutexNew(&debug_mutex_attributes);
   /* USER CODE END RTOS_MUTEX */
 
   /* Create the semaphores(s) */
@@ -610,8 +647,11 @@ int main(void)
   /* creation of sem_process_LPWA */
   sem_process_LPWAHandle = osSemaphoreNew(1, 1, &sem_process_LPWA_attributes);
 
+  /* creation of sem125_counting */
+  sem125_countingHandle = osSemaphoreNew(10, 0, &sem125_counting_attributes);
+
   /* USER CODE BEGIN RTOS_SEMAPHORES */
-	/* add semaphores, ... */
+  debug_dma_semHandle = osSemaphoreNew(1, 0, &debug_dma_sem_attributes);
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* Create the timer(s) */
@@ -972,10 +1012,10 @@ static void MX_DMA_Init(void)
 
   /* DMA interrupt init */
   /* DMA1_Channel2_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 6, 0);
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
   /* DMA1_Channel3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 6, 0);
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
   /* DMA1_Channel4_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 5, 0);
@@ -993,7 +1033,7 @@ static void MX_DMA_Init(void)
   HAL_NVIC_SetPriority(DMA2_Channel6_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel6_IRQn);
   /* DMA2_Channel7_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Channel7_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(DMA2_Channel7_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel7_IRQn);
 
 }
@@ -1150,13 +1190,15 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc)
 void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
 {
 	sai_half = 0;
-	osSemaphoreRelease(sem_125Handle);
+	//osSemaphoreRelease(sem_125Handle);
+	osSemaphoreRelease(sem125_countingHandle);
 }
 
 void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 {
 	sai_half = 1;
-	osSemaphoreRelease(sem_125Handle);
+	//osSemaphoreRelease(sem_125Handle);
+	osSemaphoreRelease(sem125_countingHandle);
 	#ifdef LOW_POWER	//Already commented out
 		////------ Power saving ---////
 		/*if((USB_plugged == 0) & (LPWA.status !=2))
@@ -1173,55 +1215,52 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     if (huart->Instance == LPUART1)
     {
         uint16_t new_data_len = 0;
+        uint16_t first_part_len = 0;
 
-        /* Calculate how many new bytes arrived since the last IDLE event */
-        if (Size > old_pos)
-        {
+        /* 1. Calculate incoming data length */
+        if (Size > old_pos) {
             new_data_len = Size - old_pos;
-            memcpy(&buffer_gps_tmp1[parse_idx], &gnss_rx_buffer[old_pos], new_data_len);
-        }
-        else if (Size < old_pos)
-        {
-            new_data_len = gnss_buff_len - old_pos;
-            memcpy(&buffer_gps_tmp1[parse_idx], &gnss_rx_buffer[old_pos], new_data_len);
-            if (Size > 0)
-            {
-                memcpy(&buffer_gps_tmp1[parse_idx + new_data_len], gnss_rx_buffer, Size);
-                new_data_len += Size;
-            }
+        } else if (Size < old_pos) {
+            new_data_len = gnss_buff_len - old_pos + Size;
         }
 
-        /* Verify and assemble the received fragment */
+        /* 2. Validate bounds and transfer data */
         if (new_data_len > 0)
         {
+            /* Clamp the transfer to avoid hard faults if logic slips */
+            if ((parse_idx + new_data_len) >= gnss_buff_len) {
+                new_data_len = gnss_buff_len - parse_idx - 1;
+            }
+
+            /* 3. Execute memory transfer safely */
+            if (Size > old_pos) {
+                memcpy(&buffer_gps_tmp1[parse_idx], &gnss_rx_buffer[old_pos], new_data_len);
+            } else {
+                first_part_len = gnss_buff_len - old_pos;
+                if(first_part_len > new_data_len) first_part_len = new_data_len;
+                memcpy(&buffer_gps_tmp1[parse_idx], &gnss_rx_buffer[old_pos], first_part_len);
+
+                if (new_data_len > first_part_len) {
+                    memcpy(&buffer_gps_tmp1[parse_idx + first_part_len], gnss_rx_buffer, new_data_len - first_part_len);
+                }
+            }
+
             parse_idx += new_data_len;
             old_pos = Size;
 
-            /* Prevent assembler overflow */
-            if (parse_idx >= gnss_buff_len)
-            {
-                memset(buffer_gps_tmp1, 0, gnss_buff_len);
-                parse_idx = 0;
-            }
-            /* * NMEA sentences end with Carriage Return '\r' and Line Feed '\n'.
-             * We explicitly check for both to guarantee the string is 100% complete
-             * before waking up the GNSS task.
-             */
-            else if (parse_idx >= 2 &&
-                     buffer_gps_tmp1[parse_idx - 2] == '\r' &&
-                     buffer_gps_tmp1[parse_idx - 1] == '\n')
-            {
-                // Ensure null termination for string processing functions (strstr)
-                buffer_gps_tmp1[parse_idx] = '\0';
+            /* Ensure null termination */
+            buffer_gps_tmp1[parse_idx] = '\0';
 
-                // Swap pointers for double buffering
+
+            if ((parse_idx > 0 && buffer_gps_tmp1[parse_idx - 1] == '\n') ||
+                (parse_idx >= (gnss_buff_len - 50)))
+            {
+                /* Swap pointers for double buffering */
                 GNSS.buffer_gps = buffer_gps_tmp1;
                 buffer_gps_tmp1 = buffer_gps_tmp2;
                 buffer_gps_tmp2 = GNSS.buffer_gps;
 
-                /* * Crucial: Clear the assembler buffer AFTER swapping pointers
-                 * to prevent phantom characters in the next NMEA burst.
-                 */
+                /* Clear assembler buffer for next fragments */
                 memset(buffer_gps_tmp1, 0, gnss_buff_len);
                 parse_idx = 0;
 
@@ -1437,7 +1476,7 @@ osStatus_t eeprom_init_queue()
 		eeprom_write_idx = 0;
 	}
 
-	#ifdef DEBUG
+	#ifdef debug_EEPROM
 		debug("\r\n*[eeprom_init_queue] EEPROM len:%d - r_idx:%d - w_idx: %d\r\n",
 				eeprom_data_len, eeprom_read_idx, eeprom_write_idx);
 	#endif
@@ -1449,7 +1488,7 @@ osStatus_t eeprom_write(uint8_t *data)
 {
 	if (eeprom_data_len == eeprom_size)
 	{
-		#ifdef DEBUG
+		#ifdef debug_EEPROM
 			debug("\r\nEEPROM is full!");
 		#endif
 		return osError;
@@ -1457,7 +1496,7 @@ osStatus_t eeprom_write(uint8_t *data)
 	WRITE_ENABLE();
 	if(Page_Write(data, eeprom_write_idx*M95P32_PAGESIZE, block_len*2)!=M95_OK)
 	{
-		#ifdef DEBUG
+		#ifdef debug_EEPROM
 			debug("\r\neeprom_write ERROR!");
 		#endif
 		return osError;
@@ -1471,7 +1510,7 @@ osStatus_t eeprom_write(uint8_t *data)
 	// If at last index in buffer, set writeIndex back to 0
 	if (eeprom_write_idx == eeprom_size)
 		eeprom_write_idx = 0;
-	#ifdef DEBUG
+	#ifdef debug_EEPROM
 		debug("\r\n*[eeprom_write] EEPROM r_idx:%d - w_idx:%d - len: %d\r\n",
 				eeprom_read_idx, eeprom_write_idx, eeprom_data_len);
 	#endif
@@ -1482,7 +1521,7 @@ osStatus_t eeprom_read(uint8_t *data_out, uint8_t clear)
 {
 	if (eeprom_data_len == 0)
 	{
-		#ifdef DEBUG
+		#ifdef debug_EEPROM
 			debug("\r\n*[eeprom_read] EEPROM is empty!");
 		#endif
 		return osErrorResource;
@@ -1490,7 +1529,7 @@ osStatus_t eeprom_read(uint8_t *data_out, uint8_t clear)
 
 	if(Single_Read(data_out, eeprom_read_idx*M95P32_PAGESIZE, block_len*2)!=M95_OK)
 	{
-		#ifdef DEBUG
+		#ifdef debug_EEPROM
 			debug("\r\n*[eeprom_read] eeprom_read ERROR!");
 		#endif
 		return osError;
@@ -1503,7 +1542,7 @@ osStatus_t eeprom_read(uint8_t *data_out, uint8_t clear)
 		WRITE_ENABLE();
 		if(Page_Write(&clr, eeprom_read_idx*M95P32_PAGESIZE, 1)!=M95_OK)
 		{
-			#ifdef DEBUG
+			#ifdef debug_EEPROM
 				debug("\r\n*[eeprom_read] eeprom_write ERROR!");
 			#endif
 			return osError;
@@ -1519,14 +1558,14 @@ osStatus_t eeprom_read(uint8_t *data_out, uint8_t clear)
 	if (eeprom_read_idx == eeprom_size)
 		eeprom_read_idx = 0;
 
-	#ifdef DEBUG
+	#ifdef debug_EEPROM
 		debug("\r\n*[eeprom_read] EEPROM r_idx:%d - w_idx:%d - len: %d\r\n",
 				eeprom_read_idx, eeprom_write_idx, eeprom_data_len);
 	#endif
 	return osOK;
 }
 
-void task_data_store(uint8_t *argument)
+/*void task_data_store(uint8_t *argument)
 {
 	uint8_t	 curr_size = (uint8_t) ((uint8_t) *argument)/2;
 	uint8_t tmp_buffer[block_len*2];
@@ -1556,7 +1595,7 @@ void task_data_store(uint8_t *argument)
 
 	osThreadExit();
 	vTaskDelete(data_store_taskHandle);
-}
+}*/
 
 void task_data_rcv(void *argument)
 {
@@ -2061,18 +2100,18 @@ void task_offline(void *argument)
 		#endif
 		if(send_buffer_length>=n_blocks_EEPROM)
 		{
-			if(osMutexAcquire(mutex_bufferHandle,100)==osOK)
+			/*if(osMutexAcquire(mutex_bufferHandle,100)==osOK)
 			{
 				for(int ii=0;ii<send_buffer_length;ii++)
 					MAIN_Queue_get(&BUFF_main, &leqs_buffer_LWPA[ii][0]);
 				osMutexRelease(mutex_bufferHandle);
 				data_store_taskHandle = osThreadNew((void *)task_data_store, (void *) &send_buffer_length, &data_store_task_attributes);
-				//flush_main_buffer_to_eeprom(send_buffer_length);
 			}
 			#ifdef debug_offline
 			else
 				debug("\r\n*[Offline TASK] Error obtaining mutex_buffer! (send_buffer_length>=n_blocks_EEPROM)");
-			#endif
+			#endif*/
+			flush_main_buffer_to_eeprom(send_buffer_length);
 		}else
 		{
 			#ifdef LOW_POWER
@@ -2266,11 +2305,13 @@ void task_usb(void *argument)
 void task_gnss(void *argument)
 {
 	#ifdef	debug_GNSS
-		debug("\r\nTask GNSS");
+		debug("\r\n[task_gnss]Task GNSS");
 	#endif
 	for(;;)
+	{
+
+		if (osSemaphoreAcquire(sem_gnssHandle, 15000) == osOK)
 		{
-			osSemaphoreAcquire(sem_gnssHandle, osWaitForever);
 			if(GNSS.valid)
 			{
 				M10ProcessPackets(GNSS.buffer_gps);
@@ -2296,8 +2337,6 @@ void task_gnss(void *argument)
 						if(HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) == HAL_OK)
 						{
 							sync_rtc_time = 1;
-							//M10GGAOnly();
-
 							#ifdef debug_GNSS
 								debug("\r\n[task_gnss] RTC OK: %02d/%02d/20%02d %02d:%02d:%02d UTC\r\n",
 									  sDate.Date, sDate.Month, sDate.Year, sTime.Hours, sTime.Minutes, sTime.Seconds);
@@ -2314,9 +2353,59 @@ void task_gnss(void *argument)
 					debug((const char *)tmp_gps, 60);
 				#endif
 			#endif
+			}else
+			{
+				#ifdef	debug_GNSS
+					debug("\r\n[task_gnss]GNSS not valid!\r\n");
+				#endif
+			}
+		}
+		else
+		{
+			if(start == true)
+			{
+			    debug("\r\n[task_gnss] TIMEOUT! GNSS Hard Reset...\r\n");
 
-		}else
-			debug("\r\nGNSS not valid!\r\n");
+			    HAL_UART_DMAStop(&hlpuart1);
+			    HAL_UART_DeInit(&hlpuart1);
+
+			    HAL_GPIO_WritePin(GPS_NRST_GPIO_Port, GPS_NRST_Pin, GPIO_PIN_RESET);
+			    vTaskDelay(pdMS_TO_TICKS(100));
+			    HAL_GPIO_WritePin(GPS_NRST_GPIO_Port, GPS_NRST_Pin, GPIO_PIN_SET);
+
+			    vTaskDelay(pdMS_TO_TICKS(1500));
+
+			    hlpuart1.Init.BaudRate = 9600;
+			    if (HAL_UART_Init(&hlpuart1) != HAL_OK) {
+			        Error_Handler();
+			    }
+
+			    M10ChangeBaudrate(115200);
+			    vTaskDelay(pdMS_TO_TICKS(100));
+			    HAL_UART_DeInit(&hlpuart1);
+			    hlpuart1.Init.BaudRate = 115200;
+			    if (HAL_UART_Init(&hlpuart1) != HAL_OK) {
+			        Error_Handler();
+			    }
+
+			    M10GGAOnly();
+			    vTaskDelay(pdMS_TO_TICKS(100));
+			    //M10ZDA(1); Seems it is not necessary
+			    //vTaskDelay(pdMS_TO_TICKS(100));
+
+			    //TEST THIS HERE OR WHEN TIME SYNC
+			    //M10PSMCT_RAM();
+
+			    old_pos = 0;
+			    parse_idx = 0;
+			    memset(gnss_rx_buffer, 0, gnss_buff_len);
+			    memset(buffer_gps_tmp1, 0, gnss_buff_len);
+
+			    HAL_UARTEx_ReceiveToIdle_DMA(&hlpuart1, gnss_rx_buffer, gnss_buff_len);
+			    __HAL_DMA_DISABLE_IT(hlpuart1.hdmarx, DMA_IT_HT);
+			    sync_rtc_time = -1;
+			}
+		}
 	}
 }
 
@@ -2484,11 +2573,13 @@ void encode(float32_t LeqVal, float32_t *TOBdata)
 			buff_addr_acq = &leqs_buffer_acq1[0];
 			buff_addr_snd = &leqs_buffer_acq2[0];
 		}
-		task_state = DOUT;
+		//task_state = DOUT;
+		/* Trigger data storage/sending task directly when the block is full */
+		osSemaphoreRelease(sem_send_dataHandle);
 	}
 
 	//TODO: Do the rtc update in a different time
-	if((RecTime != 0) & (rtc_read()>=endTime))
+	if((RecTime != 0) && (rtc_read()>=endTime))
 		stopSampling();
 
 	#ifdef debug_Leq
@@ -2594,17 +2685,7 @@ void startSampling()
 
 		M10ChangeBaudrate(115200);
 		HAL_UART_DeInit(&hlpuart1);
-		hlpuart1.Instance = LPUART1;
 		hlpuart1.Init.BaudRate = 115200;
-		hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
-		hlpuart1.Init.StopBits = UART_STOPBITS_1;
-		hlpuart1.Init.Parity = UART_PARITY_NONE;
-		hlpuart1.Init.Mode = UART_MODE_TX_RX;
-		hlpuart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-		hlpuart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-		hlpuart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_AUTOBAUDRATE_INIT;
-		hlpuart1.AdvancedInit.AutoBaudRateEnable = UART_ADVFEATURE_AUTOBAUDRATE_ENABLE;
-		hlpuart1.AdvancedInit.AutoBaudRateMode = UART_ADVFEATURE_AUTOBAUDRATE_ONSTARTBIT;
 		if (HAL_UART_Init(&hlpuart1) != HAL_OK)
 		{
 			#ifdef debug_GNSS
@@ -2949,36 +3030,18 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == LPUART1)
     {
-        /* Clear physical error flags */
-        __HAL_UART_CLEAR_OREFLAG(huart);
         HAL_UART_DMAStop(huart);
 
-        if(start == true)
-        {
-            /* Reset pointers to prevent assembly faults after recovery */
-            old_pos = 0;
-            parse_idx = 0;
+        __HAL_UART_CLEAR_FLAG(huart, UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_PEF | UART_CLEAR_FEF);
 
-            /* Restart Circular DMA */
-            HAL_UARTEx_ReceiveToIdle_DMA(&hlpuart1, gnss_rx_buffer, gnss_buff_len);
-            __HAL_DMA_DISABLE_IT(hlpuart1.hdmarx, DMA_IT_HT);
-        }
     }
     else if (huart->Instance == USART3)
     {
-        // Clear the Overrun Error (ORE) flag
         __HAL_UART_CLEAR_OREFLAG(huart);
-
-        // Abort any ongoing DMA transfers
         HAL_UART_DMAStop(huart);
-
-        // Restart LPWA DMA reception based on the active configuration mode
-        if(LPWGNS_config == true)
-        {
+        if(LPWGNS_config == true) {
             HAL_UART_Receive_DMA(huart, buffer_rx, 1);
-        }
-        else
-        {
+        } else {
             HAL_UART_Receive_DMA(huart, &buffer_lpwa[counter_lpwa], 1);
         }
     }
@@ -3180,9 +3243,24 @@ void task_signal_processing(void *argument)
 	arm_biquad_cascade_df2T_init_f32(&iirDec8, iir_order_dec_o06_f08, sos_dec_o06_f08, iir_dec_state8);
 	arm_rfft_fast_init_f32(&fft_inst, fast_125ms + 96);
 
+	/* Flag to synchronize georeferencing task with a safe offset */
+	uint8_t georef_pending = 0;
+
 	for(;;)
 	{
-		osSemaphoreAcquire(sem_125Handle, osWaitForever);
+		//osSemaphoreAcquire(sem_125Handle, osWaitForever);
+		osSemaphoreAcquire(sem125_countingHandle, osWaitForever);
+
+		//TODO: Move this out of task_signal_processing
+		if (start == true && hlpuart1.RxState == HAL_UART_STATE_READY)
+		{
+			__HAL_UART_CLEAR_FLAG(&hlpuart1, UART_CLEAR_OREF | UART_CLEAR_NEF | UART_CLEAR_PEF | UART_CLEAR_FEF);
+			old_pos = 0;
+			parse_idx = 0;
+			HAL_UARTEx_ReceiveToIdle_DMA(&hlpuart1, gnss_rx_buffer, gnss_buff_len);
+			__HAL_DMA_DISABLE_IT(hlpuart1.hdmarx, DMA_IT_HT);
+		}
+
 		#ifdef NO_MIC
 			//To work without mic
 			arm_mean_f32(sine_working_buffer, fast_125ms, &auxF);
@@ -3345,7 +3423,7 @@ void task_signal_processing(void *argument)
 		LeqFastCount++;
 		if (LeqTime == 0)
 		{
-			task_state = GEOREF;
+			//task_state = GEOREF;
 			osSemaphoreRelease(sem_georefHandle);
 
 			if (LeqFastCount >= 8)
@@ -3359,11 +3437,11 @@ void task_signal_processing(void *argument)
 				red_led(GPIO_PIN_RESET);
 			}
 
-			if (task_state == DOUT)
+			/*if (task_state == DOUT)
 			{
 				task_state = WAIT;
 				osSemaphoreRelease(sem_send_dataHandle);
-			}
+			}*/
 		}
 		else
 		{
@@ -3371,6 +3449,12 @@ void task_signal_processing(void *argument)
 			{
 			    LeqFastCount = 0;
 			    seconds++;
+			    /* Prevent buffer overflow in case of RTOS desynchronization */
+				/* 60 is the maximum size defined for LeqSeconds array      */
+				if (LeqSecondsCount >= 60)
+				{
+					LeqSecondsCount = 0;
+				}
 			    LeqSeconds[LeqSecondsCount] = Leq(LeqFastSamples, NLeqSlow);
 			    if(octave)
 			    {
@@ -3385,11 +3469,11 @@ void task_signal_processing(void *argument)
 
 			    if(LeqSecondsCount >= LeqTime)
 			    {
-			        task_state = GEOREF;
-			        red_led(GPIO_PIN_SET);
+			        //task_state = GEOREF;
+			    	/* Set flag to trigger georeferencing task safely in case 2 */
+			    	georef_pending = 1;
 			        //osSemaphoreRelease(sem_georefHandle);
 			    } else {
-			        red_led(GPIO_PIN_SET);
 			        #ifdef LOW_POWER
 			            if((USB_plugged == 0) & (LPWA.status !=2))
 			            {
@@ -3398,20 +3482,28 @@ void task_signal_processing(void *argument)
 			            }
 			        #endif
 			    }
+			    red_led(GPIO_PIN_SET);
 			} else
 			{
 				switch(LeqFastCount)
 				{
 					case 1:
-						//seconds =  rtc_read() + 1;	//TODO: Why is not synchronized with DEBUG? (eliminate + 1)
+						//To avoid overloading the first 125 ms
 					break;
 
 					case 2:
-						if(task_state == GEOREF)
+						/* Trigger georeferencing task with offset if pending */
+						if(georef_pending == 1)
+						{
+							georef_pending = 0;
+							osSemaphoreRelease(sem_georefHandle);
+						}
+
+						/*if(task_state == GEOREF)
 						{
 							task_state = WAIT;
 							osSemaphoreRelease(sem_georefHandle);
-						}else
+						}*/else
 						{
 						#ifdef LOW_POWER
 							////------ Power saving ---////
@@ -3425,12 +3517,12 @@ void task_signal_processing(void *argument)
 					break;
 
 					case 3:
-						if(task_state == DOUT)
+						/*if(task_state == DOUT)
 						{
 							task_state = WAIT;
 							osSemaphoreRelease(sem_send_dataHandle);
 						}else
-						{
+						{*/
 							#ifdef LOW_POWER
 								 ////------ Power saving ---////
 								if((USB_plugged == 0) & (LPWA.status !=2))
@@ -3439,11 +3531,12 @@ void task_signal_processing(void *argument)
 									HAL_PWR_EnterSLEEPMode(PWR_LOWPOWERREGULATOR_ON, PWR_SLEEPENTRY_WFI);
 								}
 							#endif
-						}
+						//}
 					break;
 
 					case 4:	//Half second led on
 						red_led(GPIO_PIN_RESET);
+
 					default:
 						#ifdef LOW_POWER
 							////------ Power saving ---////

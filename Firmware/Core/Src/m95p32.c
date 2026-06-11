@@ -71,7 +71,7 @@ void Transmit_Data_polling(void)
   {
     Rep = HAL_SPI_Receive_DMA(&SPI_INSTANCE, RxCom, INSTRUCTION_LEN_1_BYTE);
     osSemaphoreAcquire(sem_SPI_rx, osWaitForever);
-    //vTaskDelay(1);
+    vTaskDelay(5);
     //Rep = HAL_SPI_Receive(&SPI_INSTANCE, RxCom, INSTRUCTION_LEN_1_BYTE, SPI_DATA_TIMEOUT);
 
     if(Rep != HAL_OK)
