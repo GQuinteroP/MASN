@@ -25,9 +25,10 @@ import time
 from bitstring import BitStream, BitArray
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.interpolate import UnivariateSpline
 
 sys.path.insert(1, '../IoT_CoAP')
-from Decode_data import decode_data_new, postgresql, decode_data
+from Decode_data import decode_delta_data, postgresql, decode_data
 
 PID = 22336
 
@@ -36,10 +37,12 @@ EEPROM_N_PAGES = 8191
 #EEPROM_READ_BLOCK_LEN = 496
 
 n_bytes_header = 15
-n_bytes_payload	= 33
-block_payloads	= 7
+n_bytes_payload = 33
+n_bytes_payload_delta = 27
+block_payloads = 8
 
-EEPROM_READ_BLOCK_LEN = 2*(n_bytes_header + n_bytes_payload*block_payloads)
+# 2 blocks of 237 bytes each (15 + 33 + 7*27 = 237) = 474 bytes total
+EEPROM_READ_BLOCK_LEN = 2 * (n_bytes_header + n_bytes_payload + ((block_payloads - 1) * n_bytes_payload_delta))
 
 
 HEADER = ['Leq', 'Date/Time', 'LAT', 'LON', 'Q', 'SAT #', #'25', '31.5', '40', '50', 
@@ -269,81 +272,178 @@ class Window(QtWidgets.QMainWindow):
         self.tEdit_file.setText(fileName)
         
     def pB_read_data_clicked(self, status):
-        if(self.active_COM):    #TODO: Add this to the rest of the functions
+        if(self.active_COM):    
+            self.COM_handle.reset_input_buffer()
             self.COM_handle.flushOutput()
-            self.COM_handle.flushInput()
             output = bytes.fromhex('010000')
             self.COM_handle.write(output)
+            
             try:           
-                #Receive data len
+                # Receive data len
                 raw_bytes = self.COM_handle.read_until(size = 2)
-                print(raw_bytes.hex())
                 data_len = struct.unpack('<H', raw_bytes.ljust(2, b'\0'))[0]
                 self.pBar_read.setMaximum(data_len - 1)
                 print("data_len:", data_len)
                 
-                if(self.gBox_text.isChecked()):
-                    with open(self.tEdit_file.toPlainText(), 'w', encoding='UTF8') as f:
-                        writer = csv.writer(f, delimiter='\t')
-                        writer.writerow(HEADER)
-                        for curr_add in list(range(data_len-1, -1, -1)):#range(data_len):
-                            #print(curr_add)
-                            output = bytes.fromhex('02') + struct.pack('<H', curr_add)
-                            self.COM_handle.write(output)
-                            raw_bytes = bytearray(EEPROM_READ_BLOCK_LEN)
-                            self.COM_handle.readinto(raw_bytes)
-                            #print(raw_bytes.hex(),'\r\n')
-             
-                            for ii in range(2):
-                                # DATA = decode_data(raw_bytes.hex()[EEPROM_READ_BLOCK_LEN*ii:EEPROM_READ_BLOCK_LEN*(ii+1)])
-                                DATA = decode_data_new(raw_bytes.hex()[EEPROM_READ_BLOCK_LEN*ii:EEPROM_READ_BLOCK_LEN*(ii+1)])
-                                #print(DATA)
-                                
-                                for sample_time in DATA['samples'].keys():
-                                    row = []
-                                    row.append(DATA['samples'][sample_time]['Leq'])
-                                    row.append('\"' + str(sample_time) + '\"')
-                                    row.append(DATA['samples'][sample_time]['lat'])
-                                    row.append(DATA['samples'][sample_time]['lon'])
-                                    row.append(DATA['samples'][sample_time]['q'])
-                                    row.append(DATA['samples'][sample_time]['sat_n'])
-                                    
-                                    for tob in DATA['samples'][sample_time]['TOB'].keys():
-                                        row.append(DATA['samples'][sample_time]['TOB'][tob])    
-                                    
-                                    writer.writerow(row)   
-                                    
-                            self.pBar_read.setValue(curr_add)
-                            QApplication.processEvents()
+                # Check if the EEPROM contains no data to prevent processing crashes across all modes
+                if data_len == 0:
+                    QtWidgets.QMessageBox.warning(self, "Empty Memory", "The EEPROM is completely empty. No data available to retrieve.")
+                    return
                 
-                #### BINARY FILE OUTPUT
-                # row = bytearray([])
-                # if(self.gBox_text.isChecked()):
-                #     with open(self.tEdit_file.toPlainText(), 'wb') as f:
-                #         for curr_add in range(data_len):
-                #             #print(curr_add)
-                #             output = bytes.fromhex('02') + struct.pack('<H', curr_add)
-                #             self.COM_handle.write(output)
-                #             raw_bytes = bytearray(EEPROM_READ_BLOCK_LEN)
-                #             self.COM_handle.readinto(raw_bytes)
-                #             #print(raw_bytes.hex(),'\r\n')
-                #             #time.sleep(0.1) 
-                #             row.extend(raw_bytes)
-                                    
-                #             self.pBar_read.setValue(curr_add)
-                #             QApplication.processEvents()
+                # (15 + 33 + 7*27 = 237)
+                block_len = 237 
+                leq_time = int(self.sBox_leqt.value())
+                
+                if(self.gBox_text.isChecked()):
+                    all_rows = []
                     
-                #         f.write(row)
+                    # 1. READ AND ACCUMULATE
+                    for curr_add in list(range(data_len-1, -1, -1)):
+                        self.COM_handle.reset_input_buffer()
+                        
+                        output = bytes.fromhex('02') + struct.pack('<H', curr_add)
+                        self.COM_handle.write(output)
+                        
+                        raw_bytes = bytearray(EEPROM_READ_BLOCK_LEN)
+                        self.COM_handle.readinto(raw_bytes)
+         
+                        for ii in range(2):
+                            block_bytes = raw_bytes[block_len * ii : block_len * (ii + 1)]
+                            DATA = decode_delta_data(block_bytes.hex(), leq_time)
+                            
+                            sample_keys = list(DATA['samples'].keys())
+                            num_samples = len(sample_keys)
+                            
+                            for idx, sample_time in enumerate(sample_keys):
+                                # GNSS position is taken at the last sample of the block
+                                is_fix = (idx == num_samples - 1)
+                                
+                                row_data = {
+                                    'Leq': DATA['samples'][sample_time]['Leq'],
+                                    'Date/Time': sample_time,
+                                    'LAT': DATA['samples'][sample_time]['lat'],
+                                    'LON': DATA['samples'][sample_time]['lon'],
+                                    'Q': DATA['samples'][sample_time]['q'],
+                                    'SAT #': DATA['samples'][sample_time]['sat_n'],
+                                    'is_fix': is_fix
+                                }
+                                
+                                for tob in DATA['samples'][sample_time]['TOB'].keys():
+                                    row_data[str(tob)] = DATA['samples'][sample_time]['TOB'][tob]
+                                
+                                all_rows.append(row_data)
+                                
+                        self.pBar_read.setValue(data_len - curr_add)
+                        QApplication.processEvents()
+                    
+                    # 2. PROCESSING AND SPLINE INTERPOLATION
+                    df = pd.DataFrame(all_rows)
+                    
+                    # Parse strings using 'mixed' format to handle exact seconds and fractional seconds
+                    df['Date/Time'] = pd.to_datetime(df['Date/Time'], format='mixed')
+                    df = df.drop_duplicates(subset=['Date/Time']).sort_values('Date/Time').reset_index(drop=True)
+                    
+                    df_interp = df.copy()
+                    df_interp.loc[~df_interp['is_fix'], ['LAT', 'LON']] = np.nan
+                    
+                    valid_mask = df_interp['is_fix'] & df_interp['LAT'].notna() & df_interp['LON'].notna()
+                    
+                    if valid_mask.sum() >= 4:
+                        x_all = df_interp['Date/Time'].astype(np.int64) // 10**9
+                        x_valid = x_all[valid_mask]
+                        
+                        _, unique_indices = np.unique(x_valid, return_index=True)
+                        x_valid = x_valid.iloc[unique_indices]
+                        y_lat_valid = df_interp.loc[valid_mask, 'LAT'].iloc[unique_indices]
+                        y_lon_valid = df_interp.loc[valid_mask, 'LON'].iloc[unique_indices]
+                        
+                        # Define the maximum number of GNSS valid points per spline segment
+                        # 20 points * 8 seconds = 160 seconds window
+                        max_spline_points = 6
+                        
+                        if len(x_valid) >= 4:
+                            # # spline_lat = UnivariateSpline(x_valid, y_lat_valid)
+                            # # spline_lon = UnivariateSpline(x_valid, y_lon_valid)
+                            
+                            # # df_interp['LAT'] = spline_lat(x_all)
+                            # # df_interp['LON'] = spline_lon(x_all)
+                            
+                            # LINEAR INTERPOLATION (DEBUG)
+                            df_interp.set_index('Date/Time', inplace=True)                        
+                            df_interp['LAT'] = df_interp['LAT'].interpolate(method='time')
+                            df_interp['LON'] = df_interp['LON'].interpolate(method='time')
+                            df_interp.reset_index(inplace=True)
+                            
+                            time_prev_fix = df_interp['Date/Time'].where(valid_mask).ffill()
+                            time_next_fix = df_interp['Date/Time'].where(valid_mask).bfill()
+                            
+                            gap_seconds = (time_next_fix - time_prev_fix).dt.total_seconds()
+                            
+                            # Remove interpolations trapped in gaps larger than 60s
+                            df_interp.loc[gap_seconds > 60, ['LAT', 'LON']] = np.nan
+                            df_interp.loc[time_prev_fix.isna() | time_next_fix.isna(), ['LAT', 'LON']] = np.nan
+                            
+                            # Fill the initial orphaned samples by copying the first valid position
+                            first_valid_idx = df_interp['LAT'].first_valid_index()
+                            if first_valid_idx is not None and first_valid_idx <= 8:
+                                df_interp.loc[:first_valid_idx, 'LAT'] = df_interp.loc[first_valid_idx, 'LAT']
+                                df_interp.loc[:first_valid_idx, 'LON'] = df_interp.loc[first_valid_idx, 'LON']
+                            
+                            #### Chunk processing
+                            # df_interp['LAT'] = np.nan
+                            # df_interp['LON'] = np.nan
+                            
+                            # # Process the route in smaller chunks to prevent static data from flattening the curves
+                            # for i in range(0, len(x_valid), max_spline_points):
+                                
+                            #     end_idx = min(i + max_spline_points, len(x_valid))
+                                
+                            #     # Add a 2-point overlap with the next chunk to ensure curve continuity at boundaries
+                            #     if end_idx < len(x_valid):
+                            #         end_idx += 2 
+                                    
+                            #     x_chunk = x_valid.iloc[i:end_idx]
+                            #     lat_chunk = y_lat_valid.iloc[i:end_idx]
+                            #     lon_chunk = y_lon_valid.iloc[i:end_idx]
+                                
+                            #     # Minimum 4 points required for a cubic spline (degree 3)
+                            #     if len(x_chunk) >= 4:
+                            #         spline_lat = UnivariateSpline(x_chunk, lat_chunk)
+                            #         spline_lon = UnivariateSpline(x_chunk, lon_chunk)
+                                    
+                            #         # Identify all interpolated timestamps belonging to this specific time window
+                            #         start_time = x_chunk.iloc[0]
+                            #         end_time = x_chunk.iloc[-1]
+                                    
+                            #         chunk_mask = (x_all >= start_time) & (x_all <= end_time)
+                                    
+                            #         # Apply the calculated spline only to this specific segment
+                            #         df_interp.loc[chunk_mask, 'LAT'] = spline_lat(x_all[chunk_mask])
+                            #         df_interp.loc[chunk_mask, 'LON'] = spline_lon(x_all[chunk_mask])
+                    
+                    # 3. FINAL CSV GENERATION
+                    # Include microseconds (%f) to preserve 125ms resolution in the text file
+                    df_interp['Date/Time'] = '"' + df_interp['Date/Time'].dt.strftime('%Y-%m-%d %H:%M:%S.%f') + '"'
+                    df_interp.to_csv(self.tEdit_file.toPlainText(), sep='\t', index=False, columns=HEADER)
+                    print("Data extraction, UnivariateSpline interpolation, and export completed.")
+                    
+                    # Notify the user about successful file creation
+                    QtWidgets.QMessageBox.information(self, "Export Success", "Data extraction and CSV generation completed successfully.")
                 
                 elif(self.gBox_dB.isChecked()):
                     for curr_add in range(data_len):
+                        # LIMPIEZA CRÍTICA
+                        self.COM_handle.reset_input_buffer()
                         output = bytes.fromhex('02') + struct.pack('<H', curr_add)
                         self.COM_handle.write(output)
+                        
                         raw_bytes = bytearray(EEPROM_READ_BLOCK_LEN)
                         self.COM_handle.readinto(raw_bytes)
+                        
                         for ii in range(2):
-                            decoded = decode_data(raw_bytes.hex()[EEPROM_READ_BLOCK_LEN*ii:EEPROM_READ_BLOCK_LEN*(ii+1)])
-                            self.postgresql_handle.insert_data(decoded)
+                            block_bytes = raw_bytes[block_len * ii : block_len * (ii + 1)]
+                            DATA = decode_delta_data(block_bytes.hex(), leq_time)
+                            self.postgresql_handle.insert_data(DATA)
                                 
                         self.pBar_read.setValue(curr_add)
                         QApplication.processEvents()
@@ -353,18 +453,18 @@ class Window(QtWidgets.QMainWindow):
 
                     for curr_add in range(data_len):
                         print('Curr_add:', curr_add)
+                        # LIMPIEZA CRÍTICA
+                        self.COM_handle.reset_input_buffer()
                         output = bytes.fromhex('02') + struct.pack('<H', curr_add)
                         self.COM_handle.write(output)
-                        # time.sleep(0.05) 
+                        
                         raw_bytes = bytearray(EEPROM_READ_BLOCK_LEN)
                         self.COM_handle.readinto(raw_bytes)
-                        #print(raw_bytes.hex(),'\r\n')
                         
                         for ii in range(2):
-                            DATA = decode_data_new(raw_bytes.hex()[EEPROM_READ_BLOCK_LEN*ii:EEPROM_READ_BLOCK_LEN*(ii+1)])
-                            #DATA = decode_data(raw_bytes.hex()[EEPROM_READ_BLOCK_LEN*ii:EEPROM_READ_BLOCK_LEN*(ii+1)])
-                            # print(raw_bytes.hex()[EEPROM_READ_BLOCK_LEN*ii:EEPROM_READ_BLOCK_LEN*(ii+1)])
-                            print(DATA)
+                            block_bytes = raw_bytes[block_len * ii : block_len * (ii + 1)]
+                            DATA = decode_delta_data(block_bytes.hex(), leq_time)
+                            
                             for sample_time in DATA['samples'].keys():
                                 row = []
                                 row.append(DATA['samples'][sample_time]['Leq'])                                
@@ -380,9 +480,7 @@ class Window(QtWidgets.QMainWindow):
                     Leqs = df.apply(self.Leq)
                     self.fig, self.ax1 = plt.subplots(figsize=(10, 10))
                     self.ax1.grid()
-                    #self.ax1.step(Leqs, 'r')
-                    self.ax1.bar(HEADER_PLOT,np.asarray(Leqs), color ='maroon',
-                                     width = 0.4)
+                    self.ax1.bar(HEADER_PLOT,np.asarray(Leqs), color ='maroon', width = 0.4)
                     plt.xticks(rotation = 45)
                     print(np.asarray(Leqs))
                 
@@ -419,21 +517,35 @@ class Window(QtWidgets.QMainWindow):
         
     def pB_connect_clicked(self, checked):
         self.pB_connect.clicked.disconnect()
+        
         if(checked):
-            self.pB_connect.setChecked(False)
             self.active_COM = False
-            if self.COM_conn()  :
+            
+            # Attempt to open the port
+            if self.COM_conn():
+                # Attempt to verify the synchronization string
                 if self.send_conn_string():
-                   self.pB_connect.setStyleSheet('QPushButton {background-color: #43A047; color: white;}')
-                   self.pB_connect.setText('Disconnect')
-                   self.active_COM = True
-                   # time.sleep(0.1)
-                   self.get_config_pars()
+                    self.pB_connect.setStyleSheet('QPushButton {background-color: #43A047; color: white;}')
+                    self.pB_connect.setText('Disconnect')
+                    self.active_COM = True
+                    self.get_config_pars()
+                else:
+                    # Synchronization failed: close port, restore button state, and show alert
+                    print("Error: Device synchronization failed.")
+                    self.COM_close()
+                    self.pB_connect.setChecked(False)
+                    QtWidgets.QMessageBox.critical(self, "Connection Error", "Device synchronization failed. Please verify the firmware status.")
+            else:
+                # Failed to open port: restore button state and show alert
+                self.pB_connect.setChecked(False)
+                QtWidgets.QMessageBox.critical(self, "Connection Error", "Could not open the serial port. Verify that the device is properly connected.")
         else:
+            # Manual disconnection triggered by the user
             self.COM_close()
             self.pB_connect.setText('Connect')
             self.pB_connect.setStyleSheet('QPushButton {background-color: rgb(237, 51, 59); color: red;}')
             self.active_COM = False    
+            
         self.pB_connect.clicked.connect(self.pB_connect_clicked)
     
     def send_conn_string(self):
@@ -459,18 +571,27 @@ class Window(QtWidgets.QMainWindow):
         self.port = None
         self.baud = 115200
         self.COM_handle = None
-        #self.timeout = 1
+        
+        # Search for the specific port using PID
         for port in comports():
             print('PID:', port.pid)
             if port.pid == PID:
                 self.port = port.device
-            print(port)  
+                break # Exit loop if device is found
+            print(port)
+            
+        # Validate port existence before attempting to open
+        if self.port is None:
+            print("Error: Device not found (PID mismatch).")
+            return False
+            
         try:
             self.COM_handle = serial.Serial(self.port, self.baud, timeout=10)
             print('Connected to ' + str(self.port) + ' at ' + str(self.baud) + ' BAUD.')
             return True
-        except:
-            print("Failed to connect!")
+        except Exception as e:
+            print(f"Error connecting to port {self.port}: {e}")
+            self.COM_handle = None
             return False
             
     def COM_close(self):
